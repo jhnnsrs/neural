@@ -38,15 +38,18 @@ h_gbar_tuft = 0.00565  # mho/cm^2 (based on Harnett 2015 J Neurosci)
 # d-current
 gbar_kdmc = 0.000447365630734
 kdmc_gbar_axonm = 20
+
 # spiking currents
 gbar_nax = 0.0345117294903
 nax_gbar_axonm = 5.0
 gbar_kdr = 0.0131103978049
 kdr_gbar_axonm = 5.0
+
 # A few kinetic params changed vis-a-vis kdr.mod defaults:
 kdr_vhalfn = 11.6427471384
 gbar_kap = 0.0898600246397
 kap_gbar_axonm = 5.0
+
 # A few kinetic params changed vis-a-vis kap.mod defaults:
 kap_vhalfn = 32.7885075379
 kap_tq = -52.0967985869
