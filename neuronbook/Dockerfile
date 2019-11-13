@@ -1,21 +1,21 @@
-FROM python:3.5
+FROM jupyter/scipy-notebook
 
-RUN pip install --no-cache-dir jupyterlab
+USER root
 
 RUN mkdir -p /code
+RUN mkdir -p /config
+RUN mkdir -p /notebooks
+RUN mkdir -p /tmp
 
-
-WORKDIR /code
+ENV PYTHONPATH="$PYTHONPATH:/code"
 
 # install dependencies
-
 RUN apt-get update; apt-get install -y libncurses5-dev libreadline-dev libgsl0-dev
 
 # install neuron
-
 ENV NRN_VER=7.7
 ENV NRN=nrn-$NRN_VER
-ENV VENV=/code/neuron
+ENV VENV=/neuron
 ENV PATH=$PATH:$VENV/bin
 
 RUN wget http://www.neuron.yale.edu/ftp/neuron/versions/v$NRN_VER/$NRN.tar.gz
@@ -27,9 +27,17 @@ RUN mkdir $NRN; \
     ./configure --with-nrnpython=python --disable-rx3d --without-iv --prefix=$VENV; \
     make; make install
 
+# Make Skripts accessible
 RUN cd $VENV/bin; ln -s ../x86_64/bin/nrnivmodl
 
 RUN cd $NRN/src/nrnpython; python setup.py install
 
-RUN pip install numpy scipy pandas matplotlib requests jupyter
+WORKDIR /tmp
+ADD . /tmp
+RUN pip install -r requirements.txt
+
+WORKDIR /config
+ADD jupyter_notebook_config.json /config/home/.jupyter/lab/
+ADD jupyter_notebook_config.py /config/home/.jupyter/
+
 # Specify the default command to run
