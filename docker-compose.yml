@@ -1,0 +1,13 @@
+version: "3.7"
+
+services:
+  neuronbook:
+    build: neuron
+    command: jupyter lab --port=90 --ip=0.0.0.0 --allow-root --notebook-dir=/code/
+    environment:
+      - HOME=code
+    volumes:
+      - ./notebooks:/code/notebooks
+      - ./code:/code/code/
+    ports:
+      - "90:90"

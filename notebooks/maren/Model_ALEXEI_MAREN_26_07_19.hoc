@@ -1,0 +1,790 @@
+  
+
+/*
+The multicompartmental model of CA1 pyramidal neuron (modified from Cutsuridis et al., 2010 by Alexei Egorov)
+Compartments: soma, hillock, AIS, axon, radTprox, radTmed, radTdist, lm_R, lm_L, ScD_R, ScD_L 
+Usage: mosinit_fluct.hoc starten
+Structire:
+- Variables and Sections
+- 3D-Structure 
+- Connection the Sections 
+- Subgroups 
+- Cellular morphology 
+- Biophysics
+- AMPA synapsen
+- GUI
+- Save Data
+*/
+//####################### Variables and Sections ###########################
+load_file("nrngui.hoc")
+Rm = 15000 // Alexei Rm = 20000 
+gka_soma  = 0.0075
+gh_soma   = 0.00005
+gNa_dendr = 0.007 // for HH mechanism
+celsius=36
+tstop=30 // Alexei 
+v_init = -66.7        //-71
+
+//Creating sections
+create soma, radTprox, radTmed, radTdist, lm_R, lm_L, ScD_L, ScD_R 
+create hillock, ais, axon 
+create ampa //Artificial Firing Cell 
+
+//##################### 3D-Structure ############################
+//Construction of 3D-structure
+//Format: {x, y, z, diam} 
+  soma         {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(15, 0, 0, 1)}
+  hillock      {pt3dclear() pt3dadd(15, 0, 0, 1) pt3dadd(15, -30, 0, 1)}
+  ais          {pt3dclear() pt3dadd(15, -30, 0, 1) pt3dadd(15, -55, 0, 1)}
+  axon         {pt3dclear() pt3dadd(15, -55, 0, 1)
+				    pt3dadd(15, -63, 0, 1)
+				    pt3dadd(12, -65, 0, 1)
+				    pt3dadd(-25, -65, 0, 1)}
+  
+  radTprox     {pt3dclear() pt3dadd(15, 0, 0, 1) pt3dadd(15, 30, 0, 1)}
+  radTmed      {pt3dclear() pt3dadd(15, 30, 0, 1) pt3dadd(15, 60, 0, 1)}
+  radTdist     {pt3dclear() pt3dadd(15, 60, 0, 1) pt3dadd(15, 90, 0, 1)}
+  lm_R         {pt3dclear() pt3dadd(15, 90, 0, 1) pt3dadd(45, 105, 0, 1)}
+  lm_L         {pt3dclear() pt3dadd(15, 90, 0, 1) pt3dadd(-15, 105, 0, 1)}
+ 
+  ScD_L        {pt3dclear() pt3dadd(0, 0, 0, 1)
+                            pt3dadd(-40, -25, 0, 1)
+                            pt3dadd(-65, -59, 0, 1)}
+
+  ScD_R        {pt3dclear() pt3dadd(15, 0, 0, 1)
+                            pt3dadd(55, -25, 0, 1)
+                            pt3dadd(80, -59, 0, 1)}
+  
+
+//Artificial Firing Cell for AMPA currents. Similar to soma of CA1. 
+  ampa {pt3dclear() pt3dadd(100, 0, -20, 1) pt3dadd(115, 0, -20, 1)}
+
+//#################### Connection the Sections #########################
+//Connection the sections
+//Format: connect child(0), parent(1)
+ 
+  connect radTprox(0), soma(0.5)
+  connect radTmed(0), radTprox(1)
+  connect radTdist(0), radTmed(1)
+  connect lm_R(0), radTdist(1)
+  connect lm_L(0), radTdist(1)
+  connect ScD_L(0), soma(0)
+  connect ScD_R(0), soma(1)
+  connect hillock(0), soma(0.5)
+  connect ais(0), hillock(1)
+  connect axon(0), ais(1)
+  
+//#################### Subgroups ###########################
+//Subsets(Gruppen) werden erst initialisiert, dann die Sections eingefügt.
+
+objref all
+objref artcell //Subset for artificial CA3 cell 
+artcell = new SectionList()
+    ampa  artcell.append()
+all = new SectionList()
+    soma all.append()
+    ais all.append()
+    axon all.append()
+    radTprox all.append()
+    radTmed all.append()
+    radTdist all.append()
+    lm_R all.append()
+    lm_L all.append()
+    ScD_L all.append()
+    ScD_R all.append()
+    hillock all.append()
+       
+    ampa all.append()
+
+//##################### Cellular morphology ###########################
+//Format: section {L = length diam = diameter}
+  soma {L = 30  diam = 30}
+  hillock {L = 20  diam = 2}
+  ais {L = 33  diam = 1.22}
+  axon  {L = 500  diam = 1.2}
+// Apical dendrites 
+  radTprox {L = 100  diam = 4}
+  radTmed {L = 100  diam = 3}
+  radTdist {L = 200  diam = 2}
+  lm_R {L = 150  diam = 2}
+  lm_L {L = 150  diam = 2}
+ // Basal dendrites 
+  ScD_L {L = 150  diam = 2}
+  ScD_R {L = 150  diam = 2}
+  
+forsec all { nseg = int((L/(0.1*lambda_f(100))+.9)/2)*2 + 1 } //optimale segmentierung nach hines&carnevale
+
+//###################### Biophysics ################################
+//Passive and active ionic conductances of channels for all compartments
+//(modified from Cutsuridis et al., 2010)
+//inaT,ikdT,imZ nach Destexhe et al 2001
+soma {   
+       insert pas    			// leak conductance
+						// 0.0002 for soma; see below 
+       insert inaT
+		ena = 50
+		vtraub_inaT = -63	// threshold of -55 
+		gnabar_inaT = 0.05	// density for soma 0.0516
+		shift_inaT = -10		// inactivation around -52 mV
+		
+	insert ikdT
+		ek = -90
+		vtraub_ikdT = -63	// threshold of IKd
+		gkbar_ikdT = 100e-4	// density for soma
+		
+	insert imZ				// M-type K+ current 
+		ek = -80
+		gkbar_imZ = 0.0012	// mho/cm2 density for soma J. Storm    	
+    
+    insert hNa				// h current according to Poirazi 2003
+		gbar_hNa  = 0.02		// mmho/cm2		
+		K_hNa     = 8.8
+		vhalf_hNa = -73
+  
+    insert kap 			      // proximal A-type K+ current
+    		gkabar_kap = gka_soma	// gka_soma	= 0.0075
+
+    insert cal 				// HVA L-type Ca2+ current (Soma)
+		gcalbar_cal = 0.0007
+      	  
+    insert cat 				// T-type Ca2+ current
+       	gcatbar_cat = 0.0001/2
+  
+    insert somacar 			  // R-type Ca2+ current for Soma
+       	gcabar_somacar = 0.00003 // differ to Cutsuridis et al., 2010  
+              	
+    insert kca   			// K+(Ca2+) sAHP potassium type current
+       	gbar_kca = 5*0.0001
+			
+    insert mykca  			// medium AHP K+ current (BPG)
+    	gkbar_mykca = 0.09075
+           	       	
+    insert cad  				// calcium pump/buffering mechanism
+
+} 
+
+hillock {
+       insert pas 			// leak conductance
+
+       insert hha_old 		    // HH mechanism with high threshold for Na spikes (-50 mV)
+        gnabar_hha_old = gNa_dendr 
+        gkbar_hha_old  = gNa_dendr/8.065
+        el_hha_old     = -70
+
+      insert hNa				// h-current according to Poirazi 2003
+       	gbar_hNa  = 0.02	 	// mmho/cm2	
+       	K_hNa     = 8.8
+       	vhalf_hNa = -82
+
+	insert car				// R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.1*0.0003
+		
+	insert calH				// L-type Ca2+ channel for dendrites 
+		gcalbar_calH = 0.1*0.00031635	
+		
+	insert cat				// T-type Ca2+ current 
+		gcatbar_cat = 0.0001
+ 
+	insert imZ				// M-type K+ current 
+		ek = -80
+		gkbar_imZ = 0.0012	// mho/cm2 density for soma J. Storm    
+
+   	insert kap            		// proximal A type K+ current 
+		gkabar_kap = gka_soma	// gka_soma = 0.0075
+   	   
+       insert kca			// slow AHP K+ current
+		gbar_kca = 5*0.0001
+	
+	// varies depending on distance from 5*0.0001 to 0.5*0.0001
+
+   	insert mykca  			// medium AHP K+ current (BPG)
+   		gkbar_mykca = 2*0.0165
+
+       insert cad				// calcium pump/buffering mechanism 
+}
+
+ais{
+       insert pas  		 	// leak conductance
+      	
+	insert inaT
+		gnabar_inaT=0.25       // Na current for AP // bilo 0.1 alexei
+		shift_inaT = -10		// inactivation around -52 mV
+		vtraub_inaT = -63	// was -50 mV before
+			
+	insert ikdT
+		gkbar_ikdT=0.1/5     	// "delayer-rectifier" K current 
+		vtraub_ikdT = -63
+			
+       insert imZ			// M-type K+ current 
+		ek = -80
+		gkbar_imZ = 0.0012	// mho/cm2 density for soma J. Storm    
+
+       //insert nap			// persistent Na current  
+      //gbar_nap = 37e-7         	
+	
+ }
+
+axon{	
+       insert pas  				// leak conductance
+      	
+	insert inaT
+		gnabar_inaT=0.07
+		shift_inaT = -10		// inactivation around -52 mV
+		vtraub_inaT = -63	// was -50 mV before
+			
+	insert ikdT				// "delayer-rectifier" K current 
+		gkbar_ikdT=0.07/5
+		vtraub_ikdT = -63
+		
+	}
+
+radTprox {
+       insert pas 			// leak conductance
+
+       insert hha_old 			// HH mechanism with high threshold for Na spikes (-50 mV)
+        gnabar_hha_old = gNa_dendr 
+        gkbar_hha_old  = gNa_dendr/8.065
+        el_hha_old     = -70
+
+       insert hNa			// h current according to Poirazi 2003
+        gbar_hNa  = 0.05	     // mmho/cm2	
+        K_hNa     = 8.8
+        vhalf_hNa = -82
+
+	insert car				//R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.1*0.0003
+		
+	insert calH				//L-type Ca2+ channel for distal dendrites 
+		gcalbar_calH = 0.1*0.00031635	
+// varies from .1*0.00031635 to 10*0.00031635 as distance increases
+		
+	insert cat
+		gcatbar_cat = 0.0001
+ 
+	insert cad				// calcium pump/buffering mechanism
+
+	insert kca				// slow AHP K+ current
+		gbar_kca = 5*0.0001	// varies depending on distance from 0.5*0.0001 to 5*0.0001
+    
+	insert mykca  			// medium AHP K++ current (BPG)
+    		gkbar_mykca = 2*0.0165
+		
+	insert imZ				// M-type K+ current 
+		ek = -80
+		gkbar_imZ = 0.0012	// mho/cm2 density for soma J. Storm    
+
+    insert kap              		// Inserting A-current
+		gkabar_kap = 2*gka_soma		// gka_soma 0.0075
+   		
+    	}
+  
+radTmed {
+	  insert pas 				// leak conductance
+
+	  insert hha_old 			// HH mechanism with high threshold for Na spikes (-50 mV)
+        gnabar_hha_old = gNa_dendr 
+        gkbar_hha_old  = gNa_dendr/8.065
+        el_hha_old     = -70
+
+
+
+        insert hNa				// h-current according to Poirazi 2003
+       	gbar_hNa  = 0.05		
+      	K_hNa     = 8.8
+        	vhalf_hNa = -82
+
+	insert car				// R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.1*0.0003
+		
+	insert calH				// L-type Ca2+ channel for distal dendrites
+		gcalbar_calH = 10*0.00031635	
+// varies from .1*0.00031635 to 10*0.00031635 as distance increases
+		
+	insert cat				// HVA T-type Ca2+ channel 
+		gcatbar_cat = 0.0001	// 0.0001
+ 
+	insert cad				// calcium pump/buffering mechanism
+		
+	insert kca				// slow AHP K+ current
+		gbar_kca = 5*0.0001	// varies depending on distance from 0.5*0.0001 to 5*0.0001
+	insert mykca  			// medium AHP K++ current (BPG)
+    		gkbar_mykca = 2*0.0165
+
+	insert kad				//distal A type K+ current (>100microns) 
+		gkabar_kad = 4*gka_soma //gka_soma 0.0075
+   		   
+      
+  	}
+  	
+radTdist {
+	insert pas 				// leak conductance
+	
+	insert hha_old 			// HH mechanism with high threshold for Na spikes (-50 mV)
+        gnabar_hha_old = gNa_dendr 
+        gkbar_hha_old  = gNa_dendr/8.065
+        el_hha_old     = -70
+
+      insert hNa				// h current according to Poirazi 2003
+       	gbar_hNa  = 0.2		// mmho/cm2	
+	     	gbar_hNa  = 1.872e-5		
+        	K_hNa     = 8.8
+        	vhalf_hNa = -82
+
+	insert car				//R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.2*0.0003 // R-type Ca2+ channel distal
+		
+	insert calH 			//L-type Ca2+ channel for dendrites 
+		gcalbar_calH = 10*0.00031635	
+	// varies from .1*0.00031635 to 10*0.00031635 as distance increases
+		
+	insert cat				// T-type Ca2+ current 
+		gcatbar_cat = 2*0.0001     // T-type Ca2+ distal 
+ 
+	insert cad				// calcium pump/buffering mechanism
+
+	insert kca				// slow AHP K+ current
+		gbar_kca = 0.5*0.0001	
+// varies depending on distance from 0.5*0.0001 to 5*0.0001
+
+     insert mykca  			// medium AHP K+ current 
+     		gkbar_mykca = 0.25*0.0165
+
+	insert kad				//distal A-type K+ current (>100microns) 
+		gkabar_kad = 6*gka_soma // gka_soma 0.0075
+   		  
+      	}
+  
+lm_L {
+ 
+	    insert pas 				// passive properties
+
+	    insert hha_old 			// HH mechanism with high threshold for Na 	  spikes (-50 mV)
+       	gnabar_hha_old = gNa_dendr
+        	gkbar_hha_old  = gNa_dendr/8.065
+        	el_hha_old     = -70
+        	gl_hha_old     = 0
+
+    insert hNa				// h current according to Poirazi 2003
+       	gbar_hNa  =0.35 		// mmho/cm2	
+	     	K_hNa     = 8.8
+       	vhalf_hNa = -82
+
+  
+
+    insert kad 				//distal A-type K+ current (>100microns) 
+        gkabar_kad = 6.5*gka_soma
+  	}
+lm_R { 
+	    insert pas 				// passive properties
+
+	    insert hha_old 			// HH mechanism with high threshold for Na spikes (-50 mV)
+        	gnabar_hha_old = gNa_dendr
+        	gkbar_hha_old  = gNa_dendr/8.065
+        	el_hha_old     = -70
+        	gl_hha_old     = 0
+ 
+    insert hNa				// h current according to Poirazi 2003
+       	gbar_hNa  =0.35  		// mmho/cm2	
+       	K_hNa     = 8.8
+       	vhalf_hNa = -82
+
+    insert kad 				// Insert basal A current
+        gkabar_kad = 6.5*gka_soma  //gka_soma 0.0075
+  	}
+
+ScD_L {
+	    insert pas 				// leak conductance
+
+	    insert hha_old // HH mechanism with high threshold for Na spikes (-50 mV)
+        gnabar_hha_old = gNa_dendr
+        gkbar_hha_old  = gNa_dendr/8.065
+        el_hha_old     = -70
+
+      insert hNa				// h current according to Poirazi 2003
+       	gbar_hNa  = 0.02	 	// mmho/cm2	
+       	K_hNa     = 8.8
+       	vhalf_hNa = -82
+
+	insert car				// R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.1*0.0003
+		
+	insert calH				// L-type Ca2+ channel for distal dendrites 
+		gcalbar_calH = 0.1*0.00031635	
+		
+	insert cat				// LVA T-type Ca2+ current 
+		gcatbar_cat = 0.0001
+ 
+	insert cad				// calcium pump/buffering mechanism
+	
+	insert kca				// slow AHP K+ current
+		gbar_kca = 5*0.0001
+	// varies depending on distance from 5*0.0001 to 0.5*0.0001
+    
+	insert mykca  			// medium AHP K++ current (BPG)
+    	gkbar_mykca = 2*0.0165
+
+	insert kap                    //proximal A type K+ current 
+		gkabar_kap = gka_soma	//0.0075
+
+  	}
+
+  	
+ScD_R {
+
+	insert pas 				// leak conductance
+
+	insert hha_old // HH mechanism with high threshold for Na spikes (-50 mV)
+        	gnabar_hha_old = gNa_dendr
+        	gkbar_hha_old  = gNa_dendr/8.065
+        	el_hha_old     = -70
+
+      insert hNa				// h current according to Poirazi 2003
+       	gbar_hNa  = 0.02	 	// mmho/cm2	
+       	K_hNa     = 8.8
+       	vhalf_hNa = -82
+
+	insert car				// R-type Ca2+ channel for dendrites 
+		gcabar_car = 0.1*0.0003
+		
+	insert calH				// L-type Ca2+ channel for distal dendrites 
+		gcalbar_calH = 0.1*0.00031635	
+		
+	insert cat				// LVA T-type Ca2+ current 
+		gcatbar_cat = 0.0001
+ 
+	insert cad				// calcium pump/buffering mechanism
+	
+	insert kca				// slow AHP K+ current
+		gbar_kca = 5*0.0001
+	// varies depending on distance from 5*0.0001 to 0.5*0.0001
+    
+	insert mykca  			// medium AHP K++ current (BPG)
+    	gkbar_mykca = 2*0.0165
+
+	insert kap                    //proximal A type K+ current 
+		gkabar_kap = gka_soma	//0.0075
+                    
+//nseg=100
+  	}
+
+forsec artcell { 
+	// Artificial Firing Cell for AMPA currents. Similar to soma of CA1.
+	
+	L=30		
+	diam=30	
+	Ra=100	// Alexei Ra=150   
+	cm=0.9	// Alexei cm=1   
+	  
+	insert pas    			// leak conductance 0.0002 for soma 
+						 
+	insert inaT
+		ena = 50
+		vtraub_inaT = -63	// threshold of -55 
+		gnabar_inaT = 0.05	// density for soma 0.0516
+		shift_inaT = -10		// inactivation around -52 mV
+		
+	insert ikdT
+		ek = -90
+		vtraub_ikdT = -63	// threshold of IKd
+		gkbar_ikdT = 100e-4	// density for soma
+		
+		
+	insert imZ				// M-type K+ current 
+		ek = -80
+		gkbar_imZ = 0.0012	// mho/cm2 density for soma J. Storm    	
+    
+	
+	
+  	insert hNa				// h current according to Poirazi 2003
+		gbar_hNa  = 0.02		// mmho/cm2		
+		K_hNa     = 8.8
+		vhalf_hNa = -73
+  
+	insert kap  			// proximal A-type K+ current
+    		gkabar_kap = gka_soma	//0.0075
+
+                 
+	insert cal 				// HVA L-type Ca2+ current (Soma & proxDen)       		//gcalbar_cal = 0.014/2
+      	  gcalbar_cal = 0.0014/2
+        	     	
+	insert cat 				// LVA T-type Ca2+ current
+       	gcatbar_cat = 0.0001/2
+  	
+	insert somacar 			// HVAm R-type Ca2+ current for Soma
+       	//gcabar_somacar = 0.0003 changed Alexei
+       	 gcabar_somacar = 0.00003
+              	
+	insert kca   			// K+(Ca2+) sAHP potassium type current
+       	gbar_kca = 5*0.0001
+			
+	insert mykca  			// medium AHP K+ current (BPG)
+    		gkbar_mykca = 0.09075
+           	       	
+	insert cad  			// calcium pump/buffering mechanism
+
+}
+forsec all {
+	ek = -80
+	ena = 50
+	e_pas = -70  
+	g_pas = 1/Rm	
+	Ra = 100      // Alexei Ra = 150 
+	cm = 0.9      // Alexei cm = 1   
+}
+
+soma           {g_pas = 0.0002}
+forsec artcell {g_pas = 0.0002}
+
+
+//#################### AMPA synapsen ###############################
+//Conductances, Time constants, Potentials from Cutsuridis et al., 2010
+nampa	= 12 //number of AMPA Synapsen
+nmax 	= 200 // highest possible number of AMPA synapsen 
+wampa	= 0.001 //peak AMPA conductance in micoS 0.001 = 1nS
+
+	objectvar ampasyn[nampa], syn[nmax] 	//synapsen
+	objectvar nclistampa				//NetCon-Listen
+	objectvar ampasyn[nampa] 			//synapsen
+	nclistampa = new List()
+
+//Delete all synapses, when required 
+proc initsyn() { 
+	objectvar ampasyn[nampa], syn[nmax] 	//synapsen
+	objectvar nclistampa				//NetCon-Listen
+	objectvar ampasyn[nampa] 			//synapsen
+	nclistampa = new List()
+}
+
+proc add_syn() { 
+	//arg1: Section; arg2: Typ; arg3: rel. Pos
+	
+	if($1==1){ //soma
+		if($2==1){ //AMPA
+			soma syn[i]=new Exp2Syn($3)
+			soma syn[i].tau1=0.5
+			soma syn[i].tau2=3
+			soma syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa))
+		}
+
+	} else if($1==2){ //hillock 
+		if($2==1){ //AMPA
+			hillock syn[i]=new Exp2Syn($3)
+			hillock syn[i].tau1=0.5
+			hillock syn[i].tau2=3
+			hillock syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa))
+				
+		}
+		
+	} else if($1==3){ //radTdist
+		if($2==1){ //AMPA
+			radTdist syn[i]=new Exp2Syn($3)
+			radTdist syn[i].tau1=0.5
+			radTdist syn[i].tau2=3
+			radTdist syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa))
+
+}
+		
+	} else if($1==4){ //radTmed
+		if($2==1){ //AMPA
+			radTmed syn[i]=new Exp2Syn($3)
+			radTmed syn[i].tau1=0.5
+			radTmed syn[i].tau2=3
+			radTmed syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa))
+	}
+       } else if($1==5){ //radTprox
+		if($2==1){ //AMPA
+			radTprox syn[i]=new Exp2Syn($3)
+			radTprox syn[i].tau1=0.5
+			radTprox syn[i].tau2=3
+			radTprox syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa))
+
+
+		}
+	} else if($1==6){ //ScD_L
+		if($2==1){ //AMPA
+			ScD_L syn[i]=new Exp2Syn($3)
+			ScD_L syn[i].tau1=0.5
+			ScD_L syn[i].tau2=3
+			ScD_L syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa)) 
+
+
+		}
+	} else if($1==7){ //ScD_R
+		if($2==1){ //AMPA
+			ScD_R syn[i]=new Exp2Syn($3)
+			ScD_R syn[i].tau1=0.5    
+			ScD_R syn[i].tau2=3      
+			ScD_R syn[i].e=0
+			ampa nclistampa.append(new NetCon(&v(1), syn[i], -20, 1, wampa)) 		
+		}
+	}
+	i=i+1
+}
+
+//########################## RAND SYN #################################
+objref rand,secrand
+rand = new Random()
+secrand = new Random()
+r = 0
+posit = 0
+
+//Dend ScD_R
+proc dend_ScD_R_syn() {
+//rand.normal(0,1)
+rand.uniform(-1,1)
+for j=1,nampa {
+	punkt = 0.5 // Alexei punkt = 0.5
+	sect = 7  // Alexei 
+        r=rand.repick() // ??????
+      if (r<-1) {
+        r=1
+	sect=5    // sect=5
+      } else if (r>1) {
+       r=1
+  } 
+     posit=punkt+r*0.5
+
+       add_syn(sect,1,posit)
+}
+
+}
+
+
+//####### 
+objectvar stim[3] //Artificial Firing Cell (i.e., CA1 synaptic stimulation)
+proc stim_ampa() {
+	ampa stim[2]=new IClamp(0.5)
+	ampa stim[2].del=5	//Delay changed 50
+	ampa stim[2].dur=2	//Duration 
+	ampa stim[2].amp=0.3	//Amplitude 
+}
+stim_ampa()
+
+//######################### GUI ##################################
+nrnmainmenu()		//create main menu
+nrncontrolmenu()		//crate control menu
+
+objectvar g[20]		//max 20 graphs
+
+proc addgraph() {local ii	//provides new graphs by request
+//addgraph("variable", minvalue, maxvalue)
+	ngraph = ngraph+1
+	ii = ngraph-1
+	g[ii] = new Graph()
+	g[ii].size(0,tstop,$2,$3)
+	g[ii].xaxis()
+	g[ii].yaxis()
+	g[ii].addvar($s1,1,0)
+	g[ii].save_name("graphList[0].")
+	graphList[0].append(g[ii])
+      
+}
+
+// eigenes Config-Panel
+proc mygui() {
+	pos=0
+	sec=0
+	typ=0
+	xpanel("Synapsen-Config")
+	xlabel("Multi-Syn")
+	xpvalue("nampa",&nampa)
+	xpvalue("wampa",&wampa)
+	xbutton("Dend_ScD_R Syn","dend_ScD_R_syn()") //n random AMPA synapses
+	
+
+      xlabel("Single-Syn")
+	xmenu("Section")
+		xradiobutton("Soma",     "sec=1")
+		xradiobutton("Hillock",  "sec=2")
+		xradiobutton("radTdist", "sec=3")
+		xradiobutton("radTmed",  "sec=4")
+		xradiobutton("radTprox", "sec=5")
+		xradiobutton("ScD_L",    "sec=6")
+		xradiobutton("ScD_R",    "sec=7")
+	xmenu()
+	xpvalue("Pos:",&pos)
+	xmenu("Typ")
+		xradiobutton("Ampa", "typ=1")
+	xmenu()
+	xbutton("Create Syn","add_syn(sec,typ,pos)")
+	xbutton("Delete ALL Syn","initsyn()")
+	
+	xpanel()
+	xpanel("Graphics & Biophysics")
+	xlabel("Graphics")
+	xbutton("Graph: Soma","addgraph(\"soma.v(0.5)\",-80,40)") 	 
+	xbutton("Graph: Dend","addgraph(\"radTdist.v(0.5)\",-80,40)")	
+	xbutton("Graph: Axon","addgraph(\"axon.v(1)\",-80,40)")
+	xbutton("Graph: AMPA","addgraph(\"ampa.v(0.5)\",-80,40)")
+	xbutton("Graph: soma_gNa","addgraph(\"soma.g_inaT(0.5)\",0,0.05)")
+	xbutton("Graph: soma_gK","addgraph(\"soma.g_ikdT(0.5)\",0,0.05)")
+	xlabel("Biophysics")
+	xmenu("Section")
+		//Call the Section editor
+		xbutton("Soma","soma nrnsecmenu(-1,1)")
+      	xbutton("hillock","hillock nrnsecmenu(-1,1)")
+		xbutton("ais","ais nrnsecmenu(-1,1)")
+		xbutton("Axon","axon nrnsecmenu(-1,1)") 
+      	xbutton("ScD_R","ScD_R nrnsecmenu(-1,1)")
+           xbutton("radTprox","radTprox nrnsecmenu(-1,1)")
+		xbutton("radTmed","radTmed nrnsecmenu(-1,1)")
+		xbutton("radTdist","radTdist nrnsecmenu(-1,1)")
+		xbutton("lm_L","lm_L nrnsecmenu(-1,1)")
+		xbutton("lm_R","lm_R nrnsecmenu(-1,1)")
+		xbutton("ScD_L","ScD_L nrnsecmenu(-1,1)")
+		xbutton("artcell","ampa nrnsecmenu(-1,1)")
+
+	xmenu()
+	xpanel()
+	xpanel("Stimulations")
+	xlabel("AMPA Cell Stim")
+	xpvalue("AMPA Del",&stim[2].del)
+	xpvalue("AMPA Dur",&stim[2].dur)
+	xpvalue("AMPA Amp",&stim[2].amp)
+	xpanel()
+}
+mygui() //open all windows, can be also used, if windows are closed 
+//####################### SAVE DATA ###############################
+objref rect, recv
+rect = new Vector() //time
+recv = new Vector() //voltage
+recv.record(&soma.v(0.5))
+rect.record(&t)
+objref savdata
+objref tempmatrix
+proc save_somav() {
+	savdata = new File()
+	savdata.wopen("somav.dat")
+	savdata.printf("t soma.v(0.5)\n")
+	tempmatrix = new Matrix()
+	tempmatrix.resize(recv.size(),2)
+	tempmatrix.setcol(0, rect)
+	tempmatrix.setcol(1, recv)
+	tempmatrix.fprint(savdata, " %g")
+	savdata.close()
+}
+
+
+addgraph("soma.v(0.5)",-140,40)
+addgraph("ScD_R.v(1)",-140,40)
+addgraph("axon.v(0.5)",-140,40)
+
+
+//addgraph("ScD_L.v(1)",-140,40)
+//addgraph("ais.v(0.5)",-80,40)
+
+
+//objectvar stim
+//soma stim = new IClamp(0.5)
+//stim.del = 10
+//stim.dur = 100
+//stim.amp = 0.2
+
+
+
